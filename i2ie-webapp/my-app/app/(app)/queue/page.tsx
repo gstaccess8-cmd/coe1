@@ -26,7 +26,7 @@ import {
   GatewayLink,
   ValveLink,
 } from "@/components/filters/RecordLinks";
-import { BulkSendProgress } from "@/components/valve/BulkSendProgress";
+import { BulkSendModal } from "@/components/valve/BulkSendProgress";
 import { onAppEvent } from "@/lib/socket";
 import { debounce } from "@/lib/debounce";
 import { useAuth } from "@/lib/auth";
@@ -318,6 +318,50 @@ function BulkSendPanel() {
     void api.settings.get().then(setSettings);
   }, []);
 
+  /*
+   * Adopt a bulk run that is already going.
+   *
+   * The batch lived only in this component's state, so a refresh — or
+   * simply navigating away and back — lost the progress list and the Stop
+   * button, while the run itself carried on server-side for several more
+   * minutes. The operator was left with no way to watch it and no way to
+   * stop it.
+   *
+   * The queue is the real source of truth, so recover from it: anything
+   * still pending or sent is in flight. Oldest first, because that is the
+   * order the single lane will work through them.
+   *
+   * Two or more, because one in-flight command is not a bulk run — that is
+   * someone pressing a button on a valve row, and that row already shows
+   * its own progress.
+   */
+  useEffect(() => {
+    void api.commands.list(200).then((recent) => {
+      // Never clobber a batch started in this tab.
+      if (batch.length > 0) return;
+      const inFlight = recent
+        .filter((c) => c.status === "pending" || c.status === "sent")
+        .reverse();
+      if (inFlight.length < 2) return;
+
+      setValveNames(new Map(inFlight.map((c) => [c.valveId, c.valveCode])));
+      setValveGateways(
+        new Map(
+          inFlight.flatMap((c) =>
+            c.gatewayLabel && c.gatewayLabel !== "—"
+              ? [[c.valveId, c.gatewayLabel] as [number, string]]
+              : []
+          )
+        )
+      );
+      setBatch(inFlight);
+      setRunning(true);
+    });
+    // Mount only: this is recovery, not a subscription. Once adopted, the
+    // normal command:update stream keeps the progress list current.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function toggle(id: number) {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -476,11 +520,13 @@ function BulkSendPanel() {
       )}
 
       {batch.length > 0 && (
-        <BulkSendProgress
+        <BulkSendModal
           commands={batch}
           labelFor={labelFor}
           sublabelFor={sublabelFor}
           onAllSettled={handleAllSettled}
+          onStop={stopAll}
+          title={t("queue.bulkSend")}
         />
       )}
 

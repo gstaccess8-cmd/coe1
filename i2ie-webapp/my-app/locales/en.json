@@ -250,7 +250,9 @@
     "count": "{{count}} entries",
     "retries": "Retries",
     "retriesHint": "How many times the dispatch had to be re-sent to the worker before it was accepted. Repeated retries on one gateway usually mean a weak signal rather than a broken valve.",
-    "problemsOnly": "Problems only"
+    "problemsOnly": "Problems only",
+    "showingOf": "Showing {{shown}} of {{total}}",
+    "loadMore": "Load {{count}} more"
   },
   "settings": {
     "smsSection": "SMS command keywords",
@@ -517,7 +519,10 @@
     "nFailed": "{{count}} failed",
     "nSkipped": "{{count}} skipped — a gateway stopped answering",
     "viewAlerts": "View alerts",
-    "noneQueued": "Nothing to send — every valve here is already waiting on a command."
+    "noneQueued": "Nothing to send — every valve here is already waiting on a command.",
+    "viewProgress": "View progress ({{count}} valves)",
+    "viewResult": "View result ({{count}} valves)",
+    "stopHint": "Cancels everything not yet sent. Messages already handed to the network cannot be recalled."
   },
   "manual": {
     "search": "Search the manual…",

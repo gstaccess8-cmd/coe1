@@ -8,7 +8,7 @@
  * valves you can't eyeball the Dashboard for the ones that need attention.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useTranslation } from "react-i18next";
 import { api } from "@/lib/api";
@@ -16,6 +16,12 @@ import { onAppEvent } from "@/lib/socket";
 import { debounce } from "@/lib/debounce";
 import type { Building, CommandLog, Gateway, Unit, Valve } from "@/lib/types";
 import { Card, StatusChip, TimeAgo } from "@/components/ui";
+import {
+  applyFilters,
+  EMPTY_FILTERS,
+  RecordFilters,
+  type FilterState,
+} from "@/components/filters/RecordFilters";
 import {
   IconAlert,
   IconCheck,
@@ -30,6 +36,7 @@ export default function AlertsPage() {
   const [units, setUnits] = useState<Unit[]>([]);
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [commands, setCommands] = useState<CommandLog[]>([]);
+  const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS);
 
   const load = useCallback(async () => {
     const [g, v, u, b, c] = await Promise.all([
@@ -59,9 +66,56 @@ export default function AlertsPage() {
     };
   }, [load]);
 
-  const unreachableGateways = gateways.filter((g) => g.reachability === "unreachable");
-  const unknownValves = valves.filter((v) => v.lastStatus === "unknown");
-  const troubledCommands = commands
+  /*
+   * Filtering, across all three sections at once.
+   *
+   * The useful question on this screen is "what is wrong in Building X" or
+   * "is it all one TRB", and until now the only way to ask it was to read
+   * every row. So the same filter bar the Queue and Logs screens use sits
+   * here too — but only the dimensions that mean something per section are
+   * applied: a gateway has no date and a valve has no command status, and
+   * silently ignoring a filter is better than inventing a field to match
+   * it against.
+   *
+   *   building / gateway / search -> all three sections
+   *   date / status               -> the command section only
+   */
+  const buildingOfValve = useCallback(
+    (v: Valve) => units.find((u) => u.id === v.unitId)?.buildingId ?? null,
+    [units]
+  );
+
+  /** Gateways serving at least one valve in the selected building. */
+  const gatewaysInBuilding = useMemo(() => {
+    if (filters.buildingId === "all") return null;
+    return new Set(
+      valves
+        .filter((v) => buildingOfValve(v) === filters.buildingId)
+        .map((v) => v.gatewayId)
+    );
+  }, [valves, filters.buildingId, buildingOfValve]);
+
+  const term = filters.search.trim().toLowerCase();
+
+  const unreachableGateways = gateways.filter(
+    (g) =>
+      g.reachability === "unreachable" &&
+      (filters.gatewayId === "all" || g.id === filters.gatewayId) &&
+      (!gatewaysInBuilding || gatewaysInBuilding.has(g.id)) &&
+      (!term ||
+        g.label.toLowerCase().includes(term) ||
+        g.simNumber.toLowerCase().includes(term))
+  );
+
+  const unknownValves = valves.filter(
+    (v) =>
+      v.lastStatus === "unknown" &&
+      (filters.buildingId === "all" || buildingOfValve(v) === filters.buildingId) &&
+      (filters.gatewayId === "all" || v.gatewayId === filters.gatewayId) &&
+      (!term || v.valveCode.toLowerCase().includes(term))
+  );
+
+  const troubledCommands = applyFilters(commands, filters)
     .filter((c) => c.status === "failed" || c.status === "no_response")
     .slice(0, 30);
 
@@ -76,6 +130,13 @@ export default function AlertsPage() {
 
   return (
     <div className="space-y-4">
+      <RecordFilters
+        value={filters}
+        onChange={setFilters}
+        rows={commands}
+        resultCount={totalAlerts}
+      />
+
       {totalAlerts === 0 ? (
         <Card className="flex flex-col items-center gap-2 p-10 text-center">
           <IconCheck size={22} className="text-good" />

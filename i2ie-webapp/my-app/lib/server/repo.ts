@@ -390,7 +390,26 @@ export function createRepo(db: DatabaseSync) {
     );
   }
 
-  function listCommandLogs(limit: number): CommandLog[] {
+  /**
+   * One page of the command log, newest first.
+   *
+   * `since` and `offset` exist so the Logs screen stops fetching the entire
+   * table. It used to pull a flat 500 rows on every command:update, which
+   * is fine at a few thousand commands and steadily less fine after that —
+   * and it also meant anything older than the newest 500 was simply
+   * unreachable from the UI, no matter what date you filtered on.
+   *
+   * Filtering by date in SQL rather than in the browser is what makes the
+   * history actually reachable: the window decides which rows the database
+   * returns, instead of the browser discarding most of what it was sent.
+   * idx_commands_created keeps that cheap.
+   */
+  function listCommandLogs(
+    limit: number,
+    opts: { offset?: number; since?: string } = {}
+  ): CommandLog[] {
+    const offset = Math.max(0, opts.offset ?? 0);
+    const since = opts.since ?? null;
     const rows = db
       .prepare(
         /*
@@ -409,9 +428,10 @@ export function createRepo(db: DatabaseSync) {
          LEFT JOIN units u ON u.id = v.unit_id
          LEFT JOIN buildings b ON b.id = u.building_id
          LEFT JOIN gateways g ON g.id = v.gateway_id
-         ORDER BY c.id DESC LIMIT ?`
+         WHERE (? IS NULL OR c.created_at >= ?)
+         ORDER BY c.id DESC LIMIT ? OFFSET ?`
       )
-      .all(limit) as any[];
+      .all(since, since, limit, offset) as any[];
     return rows.map((r) => ({
       ...rowToCommand(r),
       valveCode: r.vc ?? "—",
@@ -423,6 +443,18 @@ export function createRepo(db: DatabaseSync) {
       buildingId: r.bid ?? null,
       unitId: r.uid ?? null,
     }));
+  }
+
+  /**
+   * How many commands the current window holds, so the screen can say
+   * "showing 200 of 4,312" and offer more — a Load more button that cannot
+   * tell you whether anything is left to load is a guess.
+   */
+  function countCommandLogs(since?: string): number {
+    const row = db
+      .prepare("SELECT COUNT(*) AS n FROM commands WHERE (? IS NULL OR created_at >= ?)")
+      .get(since ?? null, since ?? null) as { n: number };
+    return row.n;
   }
 
   function listStuckPending(): Command[] {
@@ -612,6 +644,7 @@ export function createRepo(db: DatabaseSync) {
     getCommand,
     updateCommand,
     listCommandLogs,
+    countCommandLogs,
     listStuckPending,
     listStuckSent,
     insertActivity,

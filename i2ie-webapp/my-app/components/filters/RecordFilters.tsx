@@ -61,7 +61,7 @@ export function isFiltering(f: FilterState): boolean {
  * "today" means their today. Using UTC here would silently drop the first
  * three hours of every Qatari day.
  */
-function dateWindow(f: FilterState): { start: number; end: number } | null {
+export function dateWindow(f: FilterState): { start: number; end: number } | null {
   if (f.datePreset === "all") return null;
 
   const startOfToday = new Date();

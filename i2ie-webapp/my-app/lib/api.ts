@@ -15,6 +15,7 @@ import type {
   Command,
   CommandAction,
   CommandLog,
+  CommandPage,
   DashboardSummary,
   Gateway,
   PingResult,
@@ -238,8 +239,28 @@ export const api = {
   },
 
   commands: {
-    /** GET /api/commands?limit= — joined log rows, newest first. */
-    list: (limit = 100) => get<CommandLog[]>(`/api/commands?limit=${limit}`),
+    /**
+     * GET /api/commands?limit= — joined log rows, newest first.
+     *
+     * Unwraps the paged envelope so the eight screens that just want "the
+     * recent commands" keep the array they have always had. Only the Logs
+     * screen needs the total, and it uses page() below.
+     */
+    list: (limit = 100) =>
+      get<CommandPage>(`/api/commands?limit=${limit}`).then((p) => p.rows),
+    /**
+     * One page of the log, with how many rows the window holds in total.
+     *
+     * `since` is an ISO timestamp and is applied in SQL, so older history
+     * is reachable by widening the date filter rather than being stranded
+     * behind a fixed row cap.
+     */
+    page: (opts: { limit: number; offset?: number; since?: string }) => {
+      const qs = new URLSearchParams({ limit: String(opts.limit) });
+      if (opts.offset) qs.set("offset", String(opts.offset));
+      if (opts.since) qs.set("since", opts.since);
+      return get<CommandPage>(`/api/commands?${qs}`);
+    },
     /** POST /api/commands/:id/cancel — stop waiting; the SMS may already be gone. */
     cancel: (id: number) => post<Command>(`/api/commands/${id}/cancel`, {}),
   },

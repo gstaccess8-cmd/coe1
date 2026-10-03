@@ -10,11 +10,12 @@
  * correctly. Archive-and-clear arrives with the real backend.
  */
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "@/lib/api";
 import {
   applyFilters,
+  dateWindow,
   EMPTY_FILTERS,
   RecordFilters,
   type FilterState,
@@ -28,7 +29,7 @@ import { onAppEvent } from "@/lib/socket";
 import { debounce } from "@/lib/debounce";
 import type { CommandLog, CommandStatus } from "@/lib/types";
 import { Button, Card, StatusChip } from "@/components/ui";
-import { IconAlert, IconChevronDown, IconLogs } from "@/components/icons";
+import { IconAlert, IconChevronDown, IconLogs, IconSpinner } from "@/components/icons";
 
 const STATUSES: CommandStatus[] = [
   "pending",
@@ -40,24 +41,89 @@ const STATUSES: CommandStatus[] = [
   "cancelled",
 ];
 
+/**
+ * How many rows one request fetches. Big enough that scrolling rarely
+ * hits the bottom, small enough that the default view stays light on a
+ * table with years of history in it.
+ */
+const PAGE_SIZE = 200;
+
 export default function LogsPage() {
   const { t, i18n } = useTranslation();
   const [rows, setRows] = useState<CommandLog[]>([]);
-  const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS);
+  /*
+   * The log opens on the last 30 days, not on everything.
+   *
+   * This screen used to pull a flat 500 newest rows regardless of filter,
+   * which had two faults at once: it grew heavier forever as the table
+   * grew, and anything past row 500 could not be reached at all — setting
+   * a date filter only discarded rows the browser had already been sent.
+   *
+   * Now the date window goes to SQL. The default keeps the common case
+   * small, and older history is reached by widening the filter, which
+   * fetches it rather than filtering a cap.
+   */
+  const [filters, setFilters] = useState<FilterState>({
+    ...EMPTY_FILTERS,
+    datePreset: "30d",
+  });
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+
+  /** The filter's start, as the ISO timestamp the API filters on. */
+  const since = useMemo(() => {
+    const w = dateWindow(filters);
+    return w && Number.isFinite(w.start) ? new Date(w.start).toISOString() : undefined;
+  }, [filters.datePreset, filters.from, filters.to]);
+
+  /*
+   * How many rows are on screen, as a ref so the live-update handler can
+   * refresh exactly that many without being re-created (and re-subscribed)
+   * on every single row change.
+   */
+  const loadedCount = useRef(0);
+  loadedCount.current = rows.length;
+
+  const fetchPage = useCallback(
+    async (offset: number) => {
+      setLoading(true);
+      try {
+        const page = await api.commands.page({ limit: PAGE_SIZE, offset, since });
+        setTotal(page.total);
+        setRows((prev) => (offset === 0 ? page.rows : [...prev, ...page.rows]));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [since]
+  );
+
+  // First page, and again whenever the date window changes.
+  useEffect(() => {
+    void fetchPage(0);
+  }, [fetchPage]);
 
   useEffect(() => {
-    const load = () => void api.commands.list(500).then(setRows);
-    load();
-    // Debounced — see queue/page.tsx's comment on why: a bulk send can fire
-    // thousands of command:update events, and this fetches 500 rows each time.
-    const reload = debounce(load, 250);
+    /*
+     * Live updates refresh everything currently on screen in one query,
+     * rather than page 0 only — otherwise a status landing on a row the
+     * operator had scrolled down to load would never appear.
+     */
+    const reload = debounce(() => {
+      void api.commands
+        .page({ limit: Math.max(PAGE_SIZE, loadedCount.current), offset: 0, since })
+        .then((page) => {
+          setTotal(page.total);
+          setRows(page.rows);
+        });
+    }, 250);
     const off = onAppEvent("command:update", reload);
     return () => {
       reload.cancel();
       off();
     };
-  }, []);
+  }, [since]);
 
   /*
    * "Show problems only".
@@ -282,6 +348,34 @@ export default function LogsPage() {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/*
+          Count first, button second.
+
+          "Showing 200 of 4,312" is the part that matters: without it an
+          operator reading a filtered log has no way to know whether they
+          are looking at the whole answer or the first page of it, which is
+          exactly the kind of quiet half-truth this project avoids
+          elsewhere. The button only appears when there is genuinely more.
+        */}
+        {rows.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-hairline px-5 py-3">
+            <span className="text-xs text-ink-3">
+              {t("logs.showingOf", { shown: rows.length, total })}
+            </span>
+            {rows.length < total && (
+              <Button
+                variant="ghost"
+                className="!px-3 !py-1.5 !text-xs"
+                disabled={loading}
+                onClick={() => void fetchPage(rows.length)}
+              >
+                {loading ? <IconSpinner size={13} /> : null}
+                {t("logs.loadMore", { count: Math.min(PAGE_SIZE, total - rows.length) })}
+              </Button>
+            )}
           </div>
         )}
       </Card>

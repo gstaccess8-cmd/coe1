@@ -278,3 +278,12 @@ export interface AppEventMap extends Record<string, unknown> {
   "queue:update": { queued: number; processingId: number | null };
   activity: { event: ActivityEvent };
 }
+
+/**
+ * One page of the command log plus how many rows the requested window
+ * holds, so a "load more" control knows whether there is any more.
+ */
+export interface CommandPage {
+  rows: CommandLog[];
+  total: number;
+}

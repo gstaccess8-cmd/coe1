@@ -12,7 +12,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslation } from "react-i18next";
 import { api } from "@/lib/api";
-import { BulkSendProgress } from "@/components/valve/BulkSendProgress";
+import { BulkSendModal } from "@/components/valve/BulkSendProgress";
 import { onAppEvent } from "@/lib/socket";
 import { debounce } from "@/lib/debounce";
 import { useAuth } from "@/lib/auth";
@@ -412,11 +412,13 @@ function SendToBuildingCard({
       </div>
 
       {batch.length > 0 && (
-        <BulkSendProgress
+        <BulkSendModal
           commands={batch}
           labelFor={labelFor}
           sublabelFor={sublabelFor}
           onAllSettled={handleAllSettled}
+          onStop={stopAll}
+          title={t("buildings.sendAllTitle")}
         />
       )}
 

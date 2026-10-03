@@ -19,10 +19,11 @@
  * could disagree with the audit log.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import Link from "next/link";
 import { onAppEvent } from "@/lib/socket";
+import { Button, Modal } from "@/components/ui";
 import type { Command, CommandStatus } from "@/lib/types";
 import {
   IconAlert,
@@ -36,6 +37,114 @@ import {
 /** A command is finished when it is no longer waiting on the modem. */
 function isSettled(status: CommandStatus): boolean {
   return status !== "pending" && status !== "sent";
+}
+
+/**
+ * The bulk run, in a modal, with Stop — the same shape as the single-valve
+ * command modal so the two behave alike.
+ *
+ * Opens itself when a run starts and can be dismissed, because a bulk send
+ * to a large building takes minutes and nobody should be held hostage by a
+ * progress dialog. Dismissing it leaves a bar in its place that opens it
+ * again: the run is server-side and keeps going either way, so the thing to
+ * avoid is not the closing, it is closing becoming a one-way door with no
+ * route back to Stop.
+ *
+ * `onStop` is optional; when given, Stop is offered for as long as there is
+ * still something queued that cancelling could actually save.
+ */
+export function BulkSendModal({
+  commands,
+  labelFor,
+  sublabelFor,
+  onAllSettled,
+  onStop,
+  title,
+}: {
+  commands: Command[];
+  labelFor: (valveId: number) => string;
+  sublabelFor?: (valveId: number) => string | undefined;
+  onAllSettled?: () => void;
+  /** Cancel everything not yet sent. Omit to offer no Stop. */
+  onStop?: () => Promise<void> | void;
+  title: string;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const [settled, setSettled] = useState(false);
+  const [stopping, setStopping] = useState(false);
+
+  // A new batch re-opens the dialog; the previous run's "finished" state
+  // must not carry over onto it.
+  useEffect(() => {
+    if (commands.length === 0) return;
+    setOpen(true);
+    setSettled(false);
+  }, [commands]);
+
+  const handleSettled = useCallback(() => {
+    setSettled(true);
+    onAllSettled?.();
+  }, [onAllSettled]);
+
+  if (commands.length === 0) return null;
+
+  return (
+    <>
+      {/*
+        The way back in. Deliberately present after the run finishes too —
+        the summary of what failed is usually read once the sending has
+        stopped, not during it.
+      */}
+      {!open && (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-edge px-3 py-2 text-xs font-medium text-ink-2 transition-colors hover:border-brand hover:text-brand"
+        >
+          {settled ? null : <IconSpinner size={13} className="text-brand" />}
+          {settled
+            ? t("bulk.viewResult", { count: commands.length })
+            : t("bulk.viewProgress", { count: commands.length })}
+        </button>
+      )}
+
+      {open && (
+        <Modal open onClose={() => setOpen(false)} title={title}>
+          <BulkSendProgress
+            commands={commands}
+            labelFor={labelFor}
+            sublabelFor={sublabelFor}
+            onAllSettled={handleSettled}
+          />
+
+          {onStop && !settled && (
+            <div className="mt-4 flex flex-col items-center gap-1">
+              <Button
+                variant="ghost"
+                className="!px-3 !py-1.5 !text-xs"
+                disabled={stopping}
+                onClick={async () => {
+                  setStopping(true);
+                  try {
+                    await onStop();
+                  } finally {
+                    setStopping(false);
+                  }
+                }}
+              >
+                {stopping ? <IconSpinner size={13} /> : <IconX size={13} />}
+                {t("action.stopAll")}
+              </Button>
+              <span className="text-center text-[11px] leading-relaxed text-ink-3">
+                {t("bulk.stopHint")}
+              </span>
+            </div>
+          )}
+        </Modal>
+      )}
+    </>
+  );
 }
 
 function StatusMark({ status, active }: { status: CommandStatus; active: boolean }) {
