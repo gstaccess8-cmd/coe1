@@ -146,17 +146,40 @@ export function ValveRow({
 
       {/* Status: pending overrides last-known, chip = icon + label */}
       {pending ? (
-        <span className="inline-flex flex-col gap-0.5">
+        /*
+          Clickable, because closing the progress modal used to be a one-way
+          door: the row fell back to a plain "Pending" chip with no way back
+          to the trail and — worse — no way to Stop, even though the command
+          was still live and still had a Stop to offer. The only escape was
+          to wait out the timeout. Re-opening it is the same modal with the
+          same live command, so Stop comes back with it.
+
+          Falls back to a plain chip if the parent has not supplied the
+          command yet, rather than offering a button that opens nothing.
+        */
+        command ? (
+          <button
+            type="button"
+            onClick={() => setModalCommand(command)}
+            title={t("valve.reopenProgress")}
+            className="inline-flex flex-col gap-0.5 text-start"
+          >
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-edge bg-surface px-2.5 py-0.5 text-xs font-medium text-ink-3 transition-colors hover:border-brand hover:text-brand">
+              <IconSpinner size={13} />
+              <span className="text-ink-2">{t("status.pending")}</span>
+            </span>
+            {command.events && command.events.length > 0 && (
+              <span className="max-w-56 truncate text-xs text-ink-3">
+                {command.events.at(-1)!.message}
+              </span>
+            )}
+          </button>
+        ) : (
           <span className="inline-flex items-center gap-1.5 rounded-full border border-edge bg-surface px-2.5 py-0.5 text-xs font-medium text-ink-3">
             <IconSpinner size={13} />
             <span className="text-ink-2">{t("status.pending")}</span>
           </span>
-          {command?.events && command.events.length > 0 && (
-            <span className="max-w-56 truncate text-xs text-ink-3">
-              {command.events.at(-1)!.message}
-            </span>
-          )}
-        </span>
+        )
       ) : (
         <span className="inline-flex items-center gap-1.5">
           <StatusChip status={valve.lastStatus} />

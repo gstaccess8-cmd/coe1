@@ -247,7 +247,10 @@
     "user": "User",
     "unit": "Unit",
     "empty": "No log entries match the filters.",
-    "count": "{{count}} entries"
+    "count": "{{count}} entries",
+    "retries": "Retries",
+    "retriesHint": "How many times the dispatch had to be re-sent to the worker before it was accepted. Repeated retries on one gateway usually mean a weak signal rather than a broken valve.",
+    "problemsOnly": "Problems only"
   },
   "settings": {
     "smsSection": "SMS command keywords",
@@ -406,7 +409,8 @@
   },
   "valve": {
     "assumed": "assumed",
-    "assumedHint": "Sent, but not verified — the gateway does not reply to open/close commands. Press Refresh to check the actual state."
+    "assumedHint": "Sent, but not verified — the gateway does not reply to open/close commands. Press Refresh to check the actual state.",
+    "reopenProgress": "Show progress and stop this command"
   },
   "device": {
     "section": "SMS device",

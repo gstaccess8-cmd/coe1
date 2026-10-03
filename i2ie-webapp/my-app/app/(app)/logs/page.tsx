@@ -28,7 +28,7 @@ import { onAppEvent } from "@/lib/socket";
 import { debounce } from "@/lib/debounce";
 import type { CommandLog, CommandStatus } from "@/lib/types";
 import { Button, Card, StatusChip } from "@/components/ui";
-import { IconChevronDown, IconLogs } from "@/components/icons";
+import { IconAlert, IconChevronDown, IconLogs } from "@/components/icons";
 
 const STATUSES: CommandStatus[] = [
   "pending",
@@ -59,7 +59,28 @@ export default function LogsPage() {
     };
   }, []);
 
-  const filtered = useMemo(() => applyFilters(rows, filters), [rows, filters]);
+  /*
+   * "Show problems only".
+   *
+   * The log is dominated by commands that worked, which is exactly what
+   * makes the handful that did not hard to find — and those are the only
+   * rows anyone opens this screen to read. A row counts as a problem if it
+   * ended badly OR needed a retry to get there: a command that succeeded on
+   * its second attempt is still telling you something about that gateway.
+   */
+  const [problemsOnly, setProblemsOnly] = useState(false);
+  const filtered = useMemo(() => {
+    const base = applyFilters(rows, filters);
+    if (!problemsOnly) return base;
+    return base.filter(
+      (r) =>
+        r.retries > 0 ||
+        r.status === "failed" ||
+        r.status === "no_response" ||
+        r.status === "skipped" ||
+        r.status === "unconfirmed"
+    );
+  }, [rows, filters, problemsOnly]);
 
   const fmt = (iso: string | null) =>
     iso
@@ -116,6 +137,14 @@ export default function LogsPage() {
           />
         </div>
         <Button
+          variant={problemsOnly ? "primary" : "ghost"}
+          className="!px-3 !py-1.5 !text-xs"
+          onClick={() => setProblemsOnly((v) => !v)}
+        >
+          <IconAlert size={13} />
+          {t("logs.problemsOnly")}
+        </Button>
+        <Button
           variant="ghost"
           className="!px-3 !py-1.5 !text-xs"
           onClick={exportCsv}
@@ -145,6 +174,7 @@ export default function LogsPage() {
                   <th className="px-4 py-2.5 text-start font-medium">{t("queue.action")}</th>
                   <th className="px-4 py-2.5 text-start font-medium">{t("queue.sms")}</th>
                   <th className="px-4 py-2.5 text-start font-medium">{t("queue.statusCol")}</th>
+                  <th className="px-4 py-2.5 text-start font-medium">{t("logs.retries")}</th>
                   <th className="px-4 py-2.5 text-start font-medium">{t("queue.reply")}</th>
                   <th className="px-4 py-2.5 text-start font-medium">{t("logs.user")}</th>
                 </tr>
@@ -202,6 +232,26 @@ export default function LogsPage() {
                         <td className="px-4 py-2.5">
                           <StatusChip status={r.status} />
                         </td>
+                        {/*
+                          Retries were already being collected and already
+                          went out in the CSV — they were simply never shown
+                          on screen, so the one number that says "this
+                          gateway is flaky rather than dead" was invisible
+                          unless you exported the file. A plain dash for
+                          zero keeps the column quiet until it matters.
+                        */}
+                        <td className="px-4 py-2.5 tabular-nums text-xs">
+                          {r.retries > 0 ? (
+                            <span
+                              className="rounded-full bg-warn/15 px-2 py-0.5 font-medium text-ink-2"
+                              title={t("logs.retriesHint")}
+                            >
+                              {r.retries}
+                            </span>
+                          ) : (
+                            <span className="text-ink-3">—</span>
+                          )}
+                        </td>
                         <td className="px-4 py-2.5 font-mono text-xs text-ink-3">
                           {r.replyText ?? "—"}
                         </td>
@@ -210,7 +260,7 @@ export default function LogsPage() {
                       {expanded && hasEvents && (
                         <tr className="bg-hairline/20">
                           <td />
-                          <td colSpan={10} className="px-4 py-3">
+                          <td colSpan={11} className="px-4 py-3">
                             <ol className="space-y-1">
                               {r.events!.map((evt, i) => (
                                 <li key={i} className="flex gap-3 text-xs text-ink-2">

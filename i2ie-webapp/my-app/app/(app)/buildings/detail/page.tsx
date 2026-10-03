@@ -317,6 +317,31 @@ function SendToBuildingCard({
     [valves]
   );
 
+  /*
+   * And the TRB behind each valve, shown under its code during a run.
+   *
+   * One building's valves are usually spread across several gateways, so
+   * "which device is this going to" is not answerable from the valve code.
+   * It matters most when a run starts failing: consecutive failures on one
+   * gateway mean a dead TRB, not five dead valves.
+   */
+  const [gatewayLabels, setGatewayLabels] = useState<Map<number, string>>(new Map());
+  useEffect(() => {
+    void api.gateways
+      .list()
+      .then((gs) => setGatewayLabels(new Map(gs.map((g) => [g.id, g.label]))))
+      .catch(() => {
+        /* Cosmetic — a missing label must never block a send. */
+      });
+  }, []);
+  const sublabelFor = useCallback(
+    (valveId: number) => {
+      const valve = valves.find((v) => v.id === valveId);
+      return valve ? gatewayLabels.get(valve.gatewayId) : undefined;
+    },
+    [valves, gatewayLabels]
+  );
+
   const handleAllSettled = useCallback(() => {
     setRunning(false);
     onSent();
@@ -390,6 +415,7 @@ function SendToBuildingCard({
         <BulkSendProgress
           commands={batch}
           labelFor={labelFor}
+          sublabelFor={sublabelFor}
           onAllSettled={handleAllSettled}
         />
       )}

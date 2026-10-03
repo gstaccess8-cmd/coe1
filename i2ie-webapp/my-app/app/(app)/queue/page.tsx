@@ -287,6 +287,29 @@ function BulkSendPanel() {
     (valveId: number) => valveNames.get(valveId) ?? `#${valveId}`,
     [valveNames]
   );
+  /*
+   * Which TRB each valve sits behind, so the progress list can name the
+   * device being addressed and not just the valve. Collected in the same
+   * pass as the ids.
+   */
+  const [valveGateways, setValveGateways] = useState<Map<number, string>>(new Map());
+  const sublabelFor = useCallback(
+    (valveId: number) => valveGateways.get(valveId),
+    [valveGateways]
+  );
+
+  /*
+   * `sending` only covers the queue call, which returns in a moment. The
+   * RUN then continues for minutes afterwards, one SMS at a time — and the
+   * selection, the action and the Send button all stayed live throughout,
+   * so a second batch could be queued on top of the first, or the selection
+   * changed under a send already in progress. `running` covers the actual
+   * run, and is cleared by BulkSendProgress when the last command settles.
+   */
+  const [running, setRunning] = useState(false);
+  const inFlight = sending || running;
+
+  const handleAllSettled = useCallback(() => setRunning(false), []);
 
   useEffect(() => {
     // Only buildings with at least one valve are worth offering here — an
@@ -330,9 +353,25 @@ function BulkSendPanel() {
       );
       const allValves = valveLists.flat();
       setValveNames(new Map(allValves.map((v) => [v.id, v.valveCode])));
+      /*
+       * Gateway labels for the progress rows. Tolerated failing: a missing
+       * label costs a sub-line on a list, and refusing to send a batch
+       * because a cosmetic lookup failed would be the wrong trade.
+       */
+      const gateways = await api.gateways.list().catch(() => []);
+      const labelById = new Map(gateways.map((g) => [g.id, g.label]));
+      setValveGateways(
+        new Map(
+          allValves.flatMap((v) => {
+            const label = labelById.get(v.gatewayId);
+            return label ? [[v.id, label] as [number, string]] : [];
+          })
+        )
+      );
       const valveIds = allValves.map((v) => v.id);
       const queuedCommands = await api.valves.queueBulkCommand(valveIds, action);
       setBatch(queuedCommands);
+      setRunning(queuedCommands.length > 0);
       setResult(
         queuedCommands.length === 0
           ? t("bulk.noneQueued")
@@ -342,6 +381,19 @@ function BulkSendPanel() {
     } finally {
       setSending(false);
     }
+  }
+
+  /*
+   * Newest-first, so commands still queued are cancelled before they ever
+   * reach the modem — stopping then actually saves SMS rather than just
+   * hiding the progress bar. Same order as the building card uses.
+   */
+  async function stopAll() {
+    for (const c of [...batch].reverse()) {
+      await api.commands.cancel(c.id).catch(() => {});
+    }
+    setRunning(false);
+    setResult(t("buildings.sendAllStopped"));
   }
 
   return (
@@ -356,12 +408,17 @@ function BulkSendPanel() {
           buildings.map((b) => (
             <label
               key={b.id}
-              className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-ink-2 hover:bg-hairline/30"
+              className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-ink-2 ${
+                inFlight
+                  ? "cursor-not-allowed opacity-50"
+                  : "cursor-pointer hover:bg-hairline/30"
+              }`}
             >
               <input
                 type="checkbox"
                 checked={selected.has(b.id)}
                 onChange={() => toggle(b.id)}
+                disabled={inFlight}
                 className="accent-brand"
               />
               <span className="min-w-0 flex-1 truncate">{b.name}</span>
@@ -386,6 +443,7 @@ function BulkSendPanel() {
         <Button
           variant={action === "on" ? "primary" : "ghost"}
           className="!justify-start !gap-2 !px-3 !py-1.5 !text-xs !whitespace-nowrap sm:!justify-center xl:!justify-start"
+          disabled={inFlight}
           onClick={() => setAction("on")}
         >
           <IconDrop size={13} />
@@ -394,6 +452,7 @@ function BulkSendPanel() {
         <Button
           variant={action === "off" ? "primary" : "ghost"}
           className="!justify-start !gap-2 !px-3 !py-1.5 !text-xs !whitespace-nowrap sm:!justify-center xl:!justify-start"
+          disabled={inFlight}
           onClick={() => setAction("off")}
         >
           <IconX size={13} />
@@ -402,6 +461,7 @@ function BulkSendPanel() {
         <Button
           variant={action === "status" ? "primary" : "ghost"}
           className="!justify-start !gap-2 !px-3 !py-1.5 !text-xs !whitespace-nowrap sm:!justify-center xl:!justify-start"
+          disabled={inFlight}
           onClick={() => setAction("status")}
         >
           <IconSend size={13} />
@@ -416,7 +476,12 @@ function BulkSendPanel() {
       )}
 
       {batch.length > 0 && (
-        <BulkSendProgress commands={batch} labelFor={labelFor} />
+        <BulkSendProgress
+          commands={batch}
+          labelFor={labelFor}
+          sublabelFor={sublabelFor}
+          onAllSettled={handleAllSettled}
+        />
       )}
 
       {result && (
@@ -427,12 +492,20 @@ function BulkSendPanel() {
 
       <Button
         className="w-full"
-        disabled={valveCount === 0 || sending}
+        disabled={valveCount === 0 || inFlight}
         onClick={send}
       >
         {sending ? <IconSpinner size={14} /> : null}
         {t("queue.bulkSendButton")}
       </Button>
+
+      {/* Only while there is still something queued to stop. */}
+      {running && (
+        <Button variant="ghost" className="mt-2 w-full" onClick={stopAll}>
+          <IconX size={14} />
+          {t("action.stopAll")}
+        </Button>
+      )}
     </Card>
   );
 }

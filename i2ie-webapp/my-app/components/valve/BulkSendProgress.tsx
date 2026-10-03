@@ -63,11 +63,22 @@ function StatusMark({ status, active }: { status: CommandStatus; active: boolean
 export function BulkSendProgress({
   commands,
   labelFor,
+  sublabelFor,
   onAllSettled,
 }: {
   /** The commands returned by the bulk queue call, in send order. */
   commands: Command[];
   labelFor: (valveId: number) => string;
+  /**
+   * The gateway each valve sits behind, shown under its code.
+   *
+   * A bulk run is a list of SMS to a list of TRBs, but the valve code alone
+   * never says which device is being addressed — so when one row stalls
+   * there is no way to tell "this valve is broken" from "this TRB is down
+   * and the next four rows are about to fail too". Naming the gateway makes
+   * that pattern visible while the run is still going.
+   */
+  sublabelFor?: (valveId: number) => string | undefined;
   onAllSettled?: () => void;
 }) {
   const { t } = useTranslation();
@@ -182,6 +193,9 @@ export function BulkSendProgress({
               </span>
               <span className="min-w-0 flex-1">
                 <span className="font-medium text-ink">{labelFor(r.valveId)}</span>
+                {sublabelFor?.(r.valveId) && (
+                  <span className="ms-1.5 text-ink-3">· {sublabelFor(r.valveId)}</span>
+                )}
                 {/* The worker's own words. Far more use than a status word:
                     "SMS rejected (code 500)" tells you what to go and fix. */}
                 {lastEvent && (
